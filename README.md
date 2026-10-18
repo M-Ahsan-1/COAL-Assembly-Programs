@@ -36,5 +36,8 @@ COAL-Assembly-Programs/
 ```
 
 ## Output Screenshots
-### Assignment 1
-![Assignment 1 output](screenshots/a1_q1_output.png)
+### Assignment 2
+![A2 Q4](screenshots/a2_q4_output.png)
+
+### Assignment 3
+![A3 Q2](screenshots/a2_q2_output.png)
