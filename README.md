@@ -40,4 +40,4 @@ COAL-Assembly-Programs/
 ![A2 Q4](screenshots/a2_q4_output.png)
 
 ### Assignment 3
-![A3 Q2](screenshots/a2_q2_output.png)
+![A3 Q2](screenshots/a3_q2_output.png)
