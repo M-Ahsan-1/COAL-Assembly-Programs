@@ -1,13 +1,19 @@
+; COAL Assignment 3 - Q2 - Video Memory 
+;GITHUB_REPO: https://github.com/M-Ahsan-1/COAL-Assembly-Programs
+
 [org 0x0100]
 jmp start
 
-title_str: db ' TEXT VIEWPORT MANAGER ', 0
+title_text: db ' TEXT VIEWPORT MANAGER ', 0
 keyword: db 'stack', 0
-msg_total: db 'Total Matches Found: ', 0
-msg_tail: db ' | Viewport Status: ACTIVE', 0
+count_text: db 'Total Matches Found: ', 0
+status_text: db ' | Viewport Status: ACTIVE', 0
+scroll_hint: db 'Press any key to scroll up', 0
+exit_hint: db '  |  ESC = Exit', 0
 
 next_line: dw 0
 
+; Zero ends each line. An extra zero ends the document.
 text:
 db 'Text mode video memory begins at segment 0xB800 and each', 0
 db 'character cell uses two bytes: the ASCII code and then an', 0
@@ -32,6 +38,9 @@ db 'This viewport scrolls independently without damaging the', 0
 db 'outer frame, margins, title, or status bar.', 0
 db 0
 
+; Reserve a word before the arguments if a result is needed.
+
+; clear_screen(fill)
 clear_screen:
 	push bp
 	mov bp, sp
@@ -58,34 +67,41 @@ clear_screen:
 	pop bp
 	ret 2
 
+; str_len(string), length goes in [bp+6]
 str_len:
 	push bp
 	mov bp, sp
 	sub sp, 2
+	push ax
 	push si
 
 	mov word [bp-2], 0
 	mov si, [bp+4]
 	cld
 
-count_string_characters:
+length_loop:
 	lodsb
 	or al, al
-	jz string_length_ready
+	jz length_done
 	inc word [bp-2]
-	jmp count_string_characters
+	jmp length_loop
 
-string_length_ready:
+length_done:
 	mov ax, [bp-2]
+	mov [bp+6], ax
+
 	pop si
+	pop ax
 	mov sp, bp
 	pop bp
 	ret 2
 
+; print_string(string, screen offset, color)
+; Next screen offset goes in [bp+10].
 print_string:
 	push bp
 	mov bp, sp
-	sub sp, 2
+	push ax
 	push si
 	push di
 	push es
@@ -97,27 +113,30 @@ print_string:
 	mov ah, [bp+4]
 	cld
 
-print_next_character:
+print_char_loop:
 	lodsb
 	or al, al
-	jz string_printed
+	jz string_done
 	stosw
-	jmp print_next_character
+	jmp print_char_loop
 
-string_printed:
-	mov [bp-2], di
+string_done:
+	mov [bp+10], di
+
 	pop es
 	pop di
 	pop si
-	mov ax, [bp-2]
+	pop ax
 	mov sp, bp
 	pop bp
 	ret 6
 
+; printNum(number, screen offset, color)
+; Next screen offset goes in [bp+10].
 printNum:
 	push bp
 	mov bp, sp
-	sub sp, 4
+	sub sp, 2
 	push ax
 	push bx
 	push cx
@@ -134,25 +153,26 @@ printNum:
 	mov bx, 10
 	mov word [bp-2], 0
 
-divide_number_into_digits:
+	; Save remainders so the digits print in the right order.
+divide_loop:
 	xor dx, dx
 	div bx
 	push dx
 	inc word [bp-2]
 	test ax, ax
-	jnz divide_number_into_digits
+	jnz divide_loop
 
 	mov cx, [bp-2]
 	mov ah, [bp+4]
 
-print_next_digit:
+digit_loop:
 	pop dx
 	add dl, '0'
 	mov al, dl
 	stosw
-	loop print_next_digit
+	loop digit_loop
 
-	mov [bp-4], di
+	mov [bp+10], di
 
 	pop es
 	pop di
@@ -160,11 +180,11 @@ print_next_digit:
 	pop cx
 	pop bx
 	pop ax
-	mov ax, [bp-4]
 	mov sp, bp
 	pop bp
 	ret 6
 
+; draw_window(top, left, bottom, right, color)
 draw_window:
 	push bp
 	mov bp, sp
@@ -185,6 +205,7 @@ draw_window:
 	dec ax
 	mov [bp-2], ax
 
+	; Top edge and corners
 	mov ax, [bp+12]
 	mov bx, 80
 	mul bx
@@ -205,10 +226,10 @@ draw_window:
 	inc ax
 	mov [bp-4], ax
 
-draw_side_borders:
+side_loop:
 	mov ax, [bp-4]
 	cmp ax, [bp+8]
-	jae draw_bottom_border
+	jae bottom_edge
 
 	mov bx, 80
 	mul bx
@@ -230,9 +251,9 @@ draw_side_borders:
 	stosw
 
 	inc word [bp-4]
-	jmp draw_side_borders
+	jmp side_loop
 
-draw_bottom_border:
+bottom_edge:
 	mov ax, [bp+8]
 	mov bx, 80
 	mul bx
@@ -259,6 +280,7 @@ draw_bottom_border:
 	pop bp
 	ret 10
 
+; draw_title(string, row, left, right, color)
 draw_title:
 	push bp
 	mov bp, sp
@@ -267,10 +289,13 @@ draw_title:
 	push bx
 	push dx
 
+	sub sp, 2
 	push word [bp+12]
 	call str_len
+	pop ax
 	mov [bp-2], ax
 
+	; Split the spare width between both sides.
 	mov ax, [bp+6]
 	sub ax, [bp+8]
 	inc ax
@@ -286,10 +311,12 @@ draw_title:
 	shl ax, 1
 	mov [bp-4], ax
 
+	sub sp, 2
 	push word [bp+12]
 	push word [bp-4]
 	push word [bp+4]
 	call print_string
+	add sp, 2
 
 	pop dx
 	pop bx
@@ -298,10 +325,13 @@ draw_title:
 	pop bp
 	ret 10
 
+; stream_text(pointer, top, left, right, bottom)
+; Next unread line goes in [bp+14].
 stream_text:
 	push bp
 	mov bp, sp
-	sub sp, 6
+	sub sp, 4
+	push ax
 	push bx
 	push cx
 	push dx
@@ -322,13 +352,13 @@ stream_text:
 	inc ax
 	mov [bp-4], ax
 
-display_next_document_line:
+line_loop:
 	mov ax, [bp-2]
 	cmp ax, [bp+4]
-	ja text_streaming_done
+	ja stream_done
 
 	cmp byte [si], 0
-	je text_streaming_done
+	je stream_done
 
 	mov ax, [bp-2]
 	mov bx, 80
@@ -340,21 +370,23 @@ display_next_document_line:
 	mov cx, [bp-4]
 	mov ah, 0x07
 
-display_next_document_character:
+text_char_loop:
 	lodsb
 	or al, al
-	jz move_to_next_text_row
-	jcxz display_next_document_character
+	jz next_text_row
+
+	; Keep reading a long line, but stop writing at the margin.
+	jcxz text_char_loop
 	stosw
 	dec cx
-	jmp display_next_document_character
+	jmp text_char_loop
 
-move_to_next_text_row:
+next_text_row:
 	inc word [bp-2]
-	jmp display_next_document_line
+	jmp line_loop
 
-text_streaming_done:
-	mov [bp-6], si
+stream_done:
+	mov [bp+14], si
 
 	pop es
 	pop di
@@ -362,11 +394,12 @@ text_streaming_done:
 	pop dx
 	pop cx
 	pop bx
-	mov ax, [bp-6]
+	pop ax
 	mov sp, bp
 	pop bp
 	ret 10
 
+; scroll_window_up(top, left, bottom, right, lines)
 scroll_window_up:
 	push bp
 	mov bp, sp
@@ -385,6 +418,7 @@ scroll_window_up:
 	mov es, ax
 	mov ds, ax
 
+	; Width and height of the text area only
 	mov ax, [bp+6]
 	sub ax, [bp+10]
 	sub ax, 3
@@ -396,19 +430,20 @@ scroll_window_up:
 
 	mov bx, [bp+4]
 	test bx, bx
-	jns limit_scroll_to_viewport
+	jns limit_scroll
 	xor bx, bx
 
-limit_scroll_to_viewport:
+limit_scroll:
 	cmp bx, ax
-	jbe scroll_amount_ready
+	jbe scroll_ready
 	mov bx, ax
 
-scroll_amount_ready:
+scroll_ready:
 	mov [bp-10], bx
 	sub ax, bx
 	mov [bp-4], ax
 
+	; First destination cell
 	mov ax, [bp+12]
 	add ax, 2
 	mov bx, 80
@@ -420,6 +455,7 @@ scroll_amount_ready:
 	shl ax, 1
 	mov [bp-6], ax
 
+	; Source starts the requested number of rows below it.
 	mov ax, [bp-10]
 	mov bx, 160
 	mul bx
@@ -428,9 +464,9 @@ scroll_amount_ready:
 
 	mov dx, [bp-4]
 	test dx, dx
-	jz prepare_to_clear_bottom_rows
+	jz blank_rows
 
-copy_next_viewport_row:
+copy_row_loop:
 	mov si, [bp-8]
 	mov di, [bp-6]
 	mov cx, [bp-2]
@@ -439,14 +475,14 @@ copy_next_viewport_row:
 	add word [bp-8], 160
 	add word [bp-6], 160
 	dec dx
-	jnz copy_next_viewport_row
+	jnz copy_row_loop
 
-prepare_to_clear_bottom_rows:
+blank_rows:
 	mov dx, [bp-10]
 	test dx, dx
-	jz scrolling_done
+	jz scroll_done
 
-clear_next_bottom_row:
+blank_row_loop:
 	mov di, [bp-6]
 	mov cx, [bp-2]
 	mov ax, 0x0720
@@ -454,9 +490,9 @@ clear_next_bottom_row:
 
 	add word [bp-6], 160
 	dec dx
-	jnz clear_next_bottom_row
+	jnz blank_row_loop
 
-scrolling_done:
+scroll_done:
 	pop es
 	pop ds
 	pop di
@@ -469,10 +505,13 @@ scrolling_done:
 	pop bp
 	ret 10
 
+; find_and_highlight(keyword, color, top, left, bottom, right)
+; Match count goes in [bp+16].
 find_and_highlight:
 	push bp
 	mov bp, sp
-	sub sp, 78
+	sub sp, 94
+	push ax
 	push bx
 	push cx
 	push dx
@@ -484,15 +523,17 @@ find_and_highlight:
 	cld
 	mov word [bp-4], 0
 
+	sub sp, 2
 	push word [bp+14]
 	call str_len
+	pop ax
 	mov [bp-2], ax
 
 	test ax, ax
-	jnz check_keyword_fits_row
-	jmp keyword_search_done
+	jnz check_keyword
+	jmp search_done
 
-check_keyword_fits_row:
+check_keyword:
 	mov ax, [bp+4]
 	sub ax, [bp+8]
 	sub ax, 3
@@ -500,21 +541,21 @@ check_keyword_fits_row:
 
 	sub ax, [bp-2]
 	mov [bp-14], ax
-	jns prepare_first_search_row
-	jmp keyword_search_done
+	jns first_search_row
+	jmp search_done
 
-prepare_first_search_row:
+first_search_row:
 	mov ax, [bp+10]
 	add ax, 2
 	mov [bp-6], ax
 
-check_search_row_boundary:
+search_row_loop:
 	mov ax, [bp-6]
 	cmp ax, [bp+6]
-	jb prepare_row_for_search
-	jmp keyword_search_done
+	jb prepare_row
+	jmp search_done
 
-prepare_row_for_search:
+prepare_row:
 	mov ax, [bp-6]
 	mov bx, 80
 	mul bx
@@ -531,29 +572,30 @@ prepare_row_for_search:
 	mov ax, ss
 	mov es, ax
 
-	lea di, [bp-78]
+	lea di, [bp-94]
 	mov cx, [bp-8]
 
-copy_row_characters_to_buffer:
+	; Put just the characters into the local row buffer.
+copy_letters_loop:
 	lodsw
 	stosb
-	loop copy_row_characters_to_buffer
+	loop copy_letters_loop
 
 	push cs
 	pop ds
 	mov word [bp-12], 0
 
-compare_keyword_at_position:
+search_pos_loop:
 	mov ax, [bp-12]
 	cmp ax, [bp-14]
-	ja move_to_next_search_row
+	ja next_search_row
 
-	lea di, [bp-78]
+	lea di, [bp-94]
 	add di, [bp-12]
 	mov si, [bp+14]
 	mov cx, [bp-2]
 	repe cmpsb
-	jne try_next_search_position
+	jne next_search_pos
 
 	inc word [bp-4]
 
@@ -569,25 +611,27 @@ compare_keyword_at_position:
 	mov dx, 0xB800
 	mov es, dx
 
-highlight_matched_characters:
+	; Paint the attributes and leave the letters alone.
+highlight_loop:
 	stosb
 	inc di
-	loop highlight_matched_characters
+	loop highlight_loop
 
 	pop es
 	inc word [bp-12]
-	jmp compare_keyword_at_position
+	jmp search_pos_loop
 
-try_next_search_position:
+next_search_pos:
 	inc word [bp-12]
-	jmp compare_keyword_at_position
+	jmp search_pos_loop
 
-move_to_next_search_row:
+next_search_row:
 	inc word [bp-6]
-	jmp check_search_row_boundary
+	jmp search_row_loop
 
-keyword_search_done:
+search_done:
 	mov ax, [bp-4]
+	mov [bp+16], ax
 
 	pop es
 	pop ds
@@ -596,42 +640,63 @@ keyword_search_done:
 	pop dx
 	pop cx
 	pop bx
+	pop ax
 	mov sp, bp
 	pop bp
 	ret 12
 
+; show_status(count)
 show_status:
 	push bp
 	mov bp, sp
 	sub sp, 2
 	push ax
+	push cx
+	push di
+	push es
+
+	; Wipe row 23 so shorter counts leave nothing behind.
+	mov ax, 0xB800
+	mov es, ax
+	mov di, 3680
+	mov cx, 80
+	mov ax, 0x0720
+	cld
+	rep stosw
 
 	mov word [bp-2], 3696
 
-	mov ax, msg_total
+	sub sp, 2
+	mov ax, count_text
 	push ax
 	push word [bp-2]
 	mov ax, 0x0A
 	push ax
 	call print_string
-
+	pop ax
 	mov [bp-2], ax
 
+	sub sp, 2
 	push word [bp+4]
 	push word [bp-2]
 	mov ax, 0x0A
 	push ax
 	call printNum
-
+	pop ax
 	mov [bp-2], ax
 
-	mov ax, msg_tail
+	sub sp, 2
+	mov ax, status_text
 	push ax
 	push word [bp-2]
 	mov ax, 0x0A
 	push ax
 	call print_string
+	add sp, 2
 
+	pop es
+	pop di
+	pop cx
 	pop ax
 	mov sp, bp
 	pop bp
@@ -657,7 +722,7 @@ start:
 	push ax
 	call draw_window
 
-	mov ax, title_str
+	mov ax, title_text
 	push ax
 	mov ax, 4
 	push ax
@@ -669,6 +734,8 @@ start:
 	push ax
 	call draw_title
 
+	; Load the first page.
+	sub sp, 2
 	mov ax, text
 	push ax
 	mov ax, 5
@@ -680,47 +747,10 @@ start:
 	mov ax, 20
 	push ax
 	call stream_text
+	pop ax
 	mov [next_line], ax
 
-wait_for_key:
-	xor ah, ah
-	int 0x16
-
-	cmp al, 27
-	jne check_document_end
-	jmp program_exit
-
-check_document_end:
-	mov bx, [next_line]
-	cmp byte [bx], 0
-	jne scroll_and_load_next_lines
-	jmp program_exit
-
-scroll_and_load_next_lines:
-	mov ax, 3
-	push ax
-	mov ax, 8
-	push ax
-	mov ax, 21
-	push ax
-	mov ax, 72
-	push ax
-	mov ax, 2
-	push ax
-	call scroll_window_up
-
-	push word [next_line]
-	mov ax, 19
-	push ax
-	mov ax, 10
-	push ax
-	mov ax, 70
-	push ax
-	mov ax, 20
-	push ax
-	call stream_text
-	mov [next_line], ax
-
+	sub sp, 2
 	mov ax, keyword
 	push ax
 	mov ax, 0xCE
@@ -734,13 +764,96 @@ scroll_and_load_next_lines:
 	mov ax, 72
 	push ax
 	call find_and_highlight
+	pop ax
+
+	push ax
+	call show_status
+
+	; Scroll hint in cyan on row 24.
+	sub sp, 2
+	mov ax, scroll_hint
+	push ax
+	mov ax, 3856
+	push ax
+	mov ax, 0x0B
+	push ax
+	call print_string
+	pop ax
+
+	; Exit hint in red, after the scroll hint.
+	sub sp, 2
+	mov bx, exit_hint
+	push bx
+	push ax
+	mov ax, 0x0C
+	push ax
+	call print_string
+	add sp, 2
+
+wait_for_key:
+	xor ah, ah
+	int 0x16
+
+	cmp al, 27
+	jne check_end
+	jmp exit_program
+
+check_end:
+	mov bx, [next_line]
+	cmp byte [bx], 0
+	jne do_scroll
+	jmp exit_program
+
+do_scroll:
+	mov ax, 3
+	push ax
+	mov ax, 8
+	push ax
+	mov ax, 21
+	push ax
+	mov ax, 72
+	push ax
+	mov ax, 2
+	push ax
+	call scroll_window_up
+
+	; Fill the two rows freed by scrolling.
+	sub sp, 2
+	push word [next_line]
+	mov ax, 19
+	push ax
+	mov ax, 10
+	push ax
+	mov ax, 70
+	push ax
+	mov ax, 20
+	push ax
+	call stream_text
+	pop ax
+	mov [next_line], ax
+
+	sub sp, 2
+	mov ax, keyword
+	push ax
+	mov ax, 0xCE
+	push ax
+	mov ax, 3
+	push ax
+	mov ax, 8
+	push ax
+	mov ax, 21
+	push ax
+	mov ax, 72
+	push ax
+	call find_and_highlight
+	pop ax
 
 	push ax
 	call show_status
 
 	jmp wait_for_key
 
-program_exit:
+exit_program:
 	mov ah, 0x02
 	xor bh, bh
 	mov dx, 0x1800
